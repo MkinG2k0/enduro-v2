@@ -106,12 +106,19 @@ pio run -e promicro8 -t upload
 
 ### Конструктор UI в браузере
 
+Онлайн (деплой с GitHub → Vercel, root `tools/`):  
+**https://enduro-ui-constructor.vercel.app**
+
+Локально:
+
 ```bash
 npx --yes serve ./tools -p 5173
 ```
 
 Открыть http://localhost:5173/ui-constructor.html → **Connect** → крутить слайдеры.  
 `fontId` меняется только перепрошивкой (`UI_FONT_ID` в `src/ui_config.h`).
+
+Пуш в `main` на GitHub автоматически пересобирает сайт на Vercel.
 
 ## Калибровка RPM
 
