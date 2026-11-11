@@ -1,0 +1,4 @@
+*.cjs
+*.py
+preview-server.js
+.vercel

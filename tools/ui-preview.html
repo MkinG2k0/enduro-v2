@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Enduro UI preview — GC9A01</title>
+  <style>
+    :root {
+      --bg: #12141a;
+      --panel: #1c2030;
+      --text: #e8eaef;
+      --muted: #9aa3b5;
+      --accent: #5b8cff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font: 14px/1.4 system-ui, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      gap: 20px;
+    }
+    .wrap {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 28px;
+      align-items: center;
+      justify-content: center;
+      max-width: 920px;
+    }
+    .bezel {
+      padding: 18px;
+      border-radius: 50%;
+      background: #0a0b0e;
+      box-shadow:
+        0 0 0 3px #2a2e3a,
+        0 0 0 10px #151820,
+        0 18px 40px rgba(0,0,0,.45);
+    }
+    canvas {
+      display: block;
+      width: 360px;
+      height: 360px;
+      border-radius: 50%;
+      image-rendering: pixelated;
+    }
+    .panel {
+      width: min(320px, 100%);
+      background: var(--panel);
+      border-radius: 12px;
+      padding: 16px 18px;
+      display: grid;
+      gap: 12px;
+    }
+    h1 {
+      margin: 0 0 4px;
+      font-size: 16px;
+      font-weight: 600;
+    }
+    p {
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    label {
+      display: grid;
+      gap: 4px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    label span { color: var(--text); }
+    input[type="range"] { width: 100%; }
+    .row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    select, button {
+      background: #2a3144;
+      color: var(--text);
+      border: 1px solid #3a4258;
+      border-radius: 8px;
+      padding: 8px 10px;
+      font: inherit;
+    }
+    button { cursor: pointer; background: var(--accent); border-color: transparent; color: #fff; }
+    button.secondary { background: #2a3144; color: var(--text); border-color: #3a4258; }
+    .chk { display: flex; align-items: center; gap: 8px; color: var(--text); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="bezel">
+      <canvas id="screen" width="240" height="240" aria-label="GC9A01 preview"></canvas>
+    </div>
+    <div class="panel">
+      <div>
+        <h1>Enduro cluster preview</h1>
+        <p>240×240 как GC9A01. Геометрия и цвета из прошивки.</p>
+      </div>
+      <label>RPM <span id="rpmVal">6500</span>
+        <input id="rpm" type="range" min="0" max="12000" step="50" value="6500" />
+      </label>
+      <label>Speed km/h <span id="spdVal">72</span>
+        <input id="spd" type="range" min="0" max="199" step="1" value="72" />
+      </label>
+      <label>Gear
+        <select id="gear">
+          <option value="-1">— (err)</option>
+          <option value="0" selected>N</option>
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+          <option value="5">5</option>
+          <option value="6">6</option>
+        </select>
+      </label>
+      <label class="chk"><input id="hb" type="checkbox" /> High beam</label>
+      <div class="row">
+        <button type="button" id="boot">Play boot</button>
+        <button type="button" class="secondary" id="idle">Idle preset</button>
+        <button type="button" class="secondary" id="redline">Redline</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    const CX = 120, CY = 120;
+    const UI_RPM_MAX = 12000;
+    const UI_RPM_WARN = 5000;
+    const UI_RPM_RED = 8000;
+    const ARC_K_COUNT = UI_RPM_MAX / 1000;
+    const ARC_SEGS_PER_K = 4;
+    const ARC_WEDGES = ARC_K_COUNT * ARC_SEGS_PER_K;
+    const ARC_R_OUT = 110;
+    const ARC_THICKNESS = 10;
+    const ARC_R_IN = ARC_R_OUT - ARC_THICKNESS;
+    const ARC_START_DEG = 220, ARC_SWEEP_DEG = 260, ARC_GAP_DEG = 3.5;
+
+    const COL = {
+      BG: "#000000",
+      TRACK: rgb565(0x2104),
+      OK: rgb565(0x07e0),
+      WARN: rgb565(0xffe0),
+      ERR: rgb565(0xf800),
+      TEXT: "#ffffff",
+      DIM: rgb565(0x7bef),
+      ACCENT: rgb565(0x07ff),
+      HB: rgb565(0x5cdf),
+    };
+
+    function rgb565(c) {
+      const r = Math.round(((c >> 11) & 31) * 255 / 31);
+      const g = Math.round(((c >> 5) & 63) * 255 / 63);
+      const b = Math.round((c & 31) * 255 / 31);
+      return `rgb(${r},${g},${b})`;
+    }
+
+    const canvas = document.getElementById("screen");
+    const ctx = canvas.getContext("2d");
+
+    function buildLut() {
+      const gaps = (ARC_K_COUNT - 1) * ARC_GAP_DEG;
+      const sectionSweep = (ARC_SWEEP_DEG - gaps) / ARC_K_COUNT;
+      const lut = [];
+      for (let k = 0; k < ARC_K_COUNT; k++) {
+        const sectionStart = ARC_START_DEG - k * (sectionSweep + ARC_GAP_DEG);
+        for (let j = 0; j <= ARC_SEGS_PER_K; j++) {
+          const t = j / ARC_SEGS_PER_K;
+          const deg = sectionStart - t * sectionSweep;
+          const rad = deg * Math.PI / 180;
+          const c = Math.cos(rad), s = Math.sin(rad);
+          lut.push({
+            xo: c * ARC_R_OUT, yo: -s * ARC_R_OUT,
+            xi: c * ARC_R_IN, yi: -s * ARC_R_IN,
+          });
+        }
+      }
+      return lut;
+    }
+    const LUT = buildLut();
+
+    function arcColorForSeg(wedge) {
+      const rpm = Math.floor((wedge + 1) * UI_RPM_MAX / ARC_WEDGES);
+      if (rpm >= UI_RPM_RED) return COL.ERR;
+      if (rpm >= UI_RPM_WARN) return COL.WARN;
+      return COL.OK;
+    }
+
+    function arcSegsForRpm(rpm) {
+      if (rpm <= 0) return 0;
+      if (rpm >= UI_RPM_MAX) return ARC_WEDGES;
+      return Math.floor(rpm * ARC_WEDGES / UI_RPM_MAX);
+    }
+
+    function drawSeg(wedge, color) {
+      if (wedge >= ARC_WEDGES) return;
+      const k = Math.floor(wedge / ARC_SEGS_PER_K);
+      const j = wedge % ARC_SEGS_PER_K;
+      const p0 = k * (ARC_SEGS_PER_K + 1) + j;
+      const a = LUT[p0], b = LUT[p0 + 1];
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(CX + a.xo, CY + a.yo);
+      ctx.lineTo(CX + b.xo, CY + b.yo);
+      ctx.lineTo(CX + a.xi, CY + a.yi);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(CX + a.xi, CY + a.yi);
+      ctx.lineTo(CX + b.xo, CY + b.yo);
+      ctx.lineTo(CX + b.xi, CY + b.yi);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    function drawCentered(text, y, px, color, baseline = "top") {
+      ctx.fillStyle = color;
+      ctx.font = `bold ${px}px monospace`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = baseline;
+      ctx.fillText(text, CX, y);
+    }
+
+    function render(state) {
+      const { rpm, speed, gear, hb } = state;
+      ctx.fillStyle = COL.BG;
+      ctx.beginPath();
+      ctx.arc(CX, CY, 120, 0, Math.PI * 2);
+      ctx.fill();
+
+      for (let i = 0; i < ARC_WEDGES; i++) drawSeg(i, COL.TRACK);
+      const segs = arcSegsForRpm(rpm);
+      for (let i = 0; i < segs; i++) drawSeg(i, arcColorForSeg(i));
+
+      const rpmShown = Math.floor(rpm / 50) * 50;
+      drawCentered(String(rpmShown), 44, 18, COL.DIM);
+      drawCentered(String(Math.min(speed, 999)), CY, 56, COL.TEXT, "middle");
+
+      let gtxt = "-", gcol = COL.ERR;
+      if (gear === 0) { gtxt = "N"; gcol = COL.ACCENT; }
+      else if (gear > 0) { gtxt = String(gear); gcol = COL.OK; }
+      drawCentered(gtxt, 172, 36, gcol);
+
+      if (hb) {
+        ctx.fillStyle = COL.HB;
+        ctx.beginPath(); ctx.arc(168, 188, 8, 0, Math.PI * 2); ctx.fill();
+      } else {
+        ctx.strokeStyle = COL.TRACK;
+        ctx.beginPath(); ctx.arc(168, 188, 8, 0, Math.PI * 2); ctx.stroke();
+      }
+    }
+
+    const rpmEl = document.getElementById("rpm");
+    const spdEl = document.getElementById("spd");
+    const gearEl = document.getElementById("gear");
+    const hbEl = document.getElementById("hb");
+
+    function readState() {
+      return {
+        rpm: +rpmEl.value,
+        speed: +spdEl.value,
+        gear: +gearEl.value,
+        hb: hbEl.checked,
+      };
+    }
+
+    function syncLabels() {
+      document.getElementById("rpmVal").textContent = rpmEl.value;
+      document.getElementById("spdVal").textContent = spdEl.value;
+    }
+
+    function paint() {
+      syncLabels();
+      render(readState());
+    }
+
+    ["input", "change"].forEach((ev) => {
+      rpmEl.addEventListener(ev, paint);
+      spdEl.addEventListener(ev, paint);
+      gearEl.addEventListener(ev, paint);
+      hbEl.addEventListener(ev, paint);
+    });
+
+    document.getElementById("idle").onclick = () => {
+      rpmEl.value = 1500; spdEl.value = 0; gearEl.value = "0"; hbEl.checked = false; paint();
+    };
+    document.getElementById("redline").onclick = () => {
+      rpmEl.value = 10500; spdEl.value = 98; gearEl.value = "4"; hbEl.checked = true; paint();
+    };
+
+    let bootTimer = null;
+    document.getElementById("boot").onclick = async () => {
+      if (bootTimer) return;
+      const sleep = (ms) => new Promise((r) => { bootTimer = setTimeout(r, ms); });
+      for (let s = 0; s <= ARC_WEDGES; s++) {
+        render({ rpm: Math.round(s * UI_RPM_MAX / ARC_WEDGES), speed: 0, gear: 0, hb: false });
+        await sleep(16);
+      }
+      for (let s = ARC_WEDGES; s >= 0; s--) {
+        render({ rpm: Math.round(s * UI_RPM_MAX / ARC_WEDGES), speed: 0, gear: 0, hb: false });
+        await sleep(12);
+      }
+      ctx.fillStyle = COL.BG;
+      ctx.fillRect(40, 96, 160, 44);
+      drawCentered("ENDURO", 100, 20, COL.TEXT);
+      drawCentered("2.0.0-rider", 128, 11, COL.DIM);
+      await sleep(400);
+      bootTimer = null;
+      paint();
+    };
+
+    paint();
+  </script>
+</body>
+</html>

@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Enduro — варианты шрифтов</title>
+  <style>
+    :root { --bg:#12141a; --panel:#1c2030; --text:#e8eaef; --muted:#9aa3b5; --accent:#5b8cff; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; padding: 24px;
+      font: 14px/1.4 system-ui, sans-serif; color: var(--text); background: var(--bg);
+      display: grid; place-items: center;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    .wrap {
+      display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; justify-content: center;
+      max-width: 980px;
+    }
+    .bezel {
+      padding: 18px; border-radius: 50%; background: #0a0b0e;
+      box-shadow: 0 0 0 3px #2a2e3a, 0 0 0 10px #151820, 0 18px 40px rgba(0,0,0,.45);
+    }
+    canvas { display: block; width: 360px; height: 360px; border-radius: 50%; }
+    .panel {
+      width: min(380px, 100%); background: var(--panel); border-radius: 12px;
+      padding: 16px 18px; display: grid; gap: 10px;
+    }
+    h1 { margin: 0; font-size: 16px; font-weight: 600; }
+    p { margin: 0; color: var(--muted); font-size: 12px; }
+    .opt {
+      display: grid; gap: 2px; padding: 10px 12px; border-radius: 8px;
+      border: 1px solid #3a4258; background: #2a3144; cursor: pointer; text-align: left;
+      color: var(--text); font: inherit;
+    }
+    .opt.active { border-color: var(--accent); background: #243152; }
+    .opt strong { font-size: 13px; }
+    .opt span { font-size: 11px; color: var(--muted); }
+    .sample {
+      margin-top: 4px; padding: 8px 10px; border-radius: 6px; background: #0b0d12;
+      font-size: 28px; line-height: 1; color: #fff;
+    }
+    .note { font-size: 11px; color: var(--muted); margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="bezel">
+      <canvas id="screen" width="240" height="240" aria-label="Font preview"></canvas>
+    </div>
+    <div class="panel">
+      <div>
+        <h1>Шрифты для GC9A01</h1>
+        <p><b style="color:#fff">На плате сейчас: FreeSansBold9.</b> Клик по варианту — только превью в браузере.</p>
+      </div>
+      <div id="opts"></div>
+      <p class="note">Flash: один FreeSansBold24 ≈ 5–8 КБ. На Pro Micro лучше: скорость = Sans Bold 18/24, RPM/gear = Sans 9/12. Все семейства разом — не влезут.</p>
+    </div>
+  </div>
+  <script>
+    const CX = 120, CY = 120;
+    const FONTS = [
+      {
+        id: "default",
+        title: "Default GFX",
+        desc: "Пиксель 5×7 (size 2/4/6). В браузере имитируем пикселизацию.",
+        pixel: true,
+        css: "700 10px monospace",
+        rpm: "700 8px monospace",
+        gear: "700 9px monospace",
+        scale: { speed: 5, rpm: 2, gear: 4 },
+        sample: "72",
+      },
+      {
+        id: "sans",
+        title: "Сейчас на плате: FreeSansBold9",
+        desc: "Чистый гротеск — сглаженные глифы (не 5×7 пиксель)",
+        css: "700 54px Arial, Helvetica, sans-serif",
+        rpm: "600 16px Arial, Helvetica, sans-serif",
+        gear: "700 36px Arial, Helvetica, sans-serif",
+        sample: "72",
+      },
+      {
+        id: "mono",
+        title: "FreeMono / FreeMonoBold",
+        desc: "Моноширинный, ровные цифры, чуть «терминальный»",
+        css: "700 52px Consolas, 'Courier New', monospace",
+        rpm: "700 15px Consolas, 'Courier New', monospace",
+        gear: "700 34px Consolas, 'Courier New', monospace",
+        sample: "72",
+      },
+      {
+        id: "serif",
+        title: "FreeSerif / FreeSerifBold",
+        desc: "С засечками — на 240px часто хуже читается в движении",
+        css: "700 54px 'Times New Roman', Times, serif",
+        rpm: "600 16px 'Times New Roman', Times, serif",
+        gear: "700 36px 'Times New Roman', Times, serif",
+        sample: "72",
+      },
+      {
+        id: "tiny",
+        title: "Picopixel / TomThumb / Org_01",
+        desc: "Ещё мельче пиксель-шрифты — только для мелких лейблов",
+        css: "bold 48px monospace",
+        rpm: "bold 11px monospace",
+        gear: "bold 28px monospace",
+        sample: "72",
+      },
+    ];
+
+    let active = FONTS.find((f) => f.id === "sans") || FONTS[0];
+    const canvas = document.getElementById("screen");
+    const ctx = canvas.getContext("2d");
+    const opts = document.getElementById("opts");
+
+    function rgb565(c) {
+      const r = Math.round(((c >> 11) & 31) * 255 / 31);
+      const g = Math.round(((c >> 5) & 63) * 255 / 63);
+      const b = Math.round((c & 31) * 255 / 31);
+      return `rgb(${r},${g},${b})`;
+    }
+    const COL = {
+      BG: "#000", TRACK: rgb565(0x2104), OK: rgb565(0x07e0),
+      WARN: rgb565(0xffe0), TEXT: "#fff", DIM: rgb565(0x7bef), ACCENT: rgb565(0x07ff),
+    };
+
+    function drawArc() {
+      const R_OUT = 110, THICKNESS = 10, R_IN = R_OUT - THICKNESS;
+      const START = 220, SWEEP = 260, GAP = 3.5, K = 12;
+      const section = (SWEEP - (K - 1) * GAP) / K;
+      for (let k = 0; k < K; k++) {
+        const a0 = (START - k * (section + GAP)) * Math.PI / 180;
+        const a1 = (START - k * (section + GAP) - section) * Math.PI / 180;
+        ctx.beginPath();
+        for (let i = 0; i <= 8; i++) {
+          const t = i / 8, ang = a0 + (a1 - a0) * t;
+          const x = CX + Math.cos(ang) * R_OUT, y = CY - Math.sin(ang) * R_OUT;
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        for (let i = 8; i >= 0; i--) {
+          const t = i / 8, ang = a0 + (a1 - a0) * t;
+          ctx.lineTo(CX + Math.cos(ang) * R_IN, CY - Math.sin(ang) * R_IN);
+        }
+        ctx.closePath();
+        ctx.fillStyle = k < 5 ? COL.OK : (k < 7 ? COL.WARN : COL.TRACK);
+        ctx.fill();
+      }
+    }
+
+    function drawPixelText(text, x, y, fontCss, color, scale, baseline) {
+      const off = document.createElement("canvas");
+      const octx = off.getContext("2d");
+      octx.font = fontCss;
+      octx.textBaseline = "top";
+      const w = Math.ceil(octx.measureText(text).width) + 2;
+      const h = 14;
+      off.width = w;
+      off.height = h;
+      octx.font = fontCss;
+      octx.fillStyle = color;
+      octx.textBaseline = "top";
+      octx.fillText(text, 1, 1);
+      const dw = w * scale, dh = h * scale;
+      let dy = y;
+      if (baseline === "middle") dy = y - dh / 2;
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(off, 0, 0, w, h, x - dw / 2, dy, dw, dh);
+      ctx.imageSmoothingEnabled = true;
+    }
+
+    function render() {
+      ctx.fillStyle = COL.BG;
+      ctx.beginPath(); ctx.arc(CX, CY, 120, 0, Math.PI * 2); ctx.fill();
+      drawArc();
+      if (active.pixel) {
+        const s = active.scale;
+        drawPixelText("6500", CX, 44, active.rpm, COL.DIM, s.rpm, "top");
+        drawPixelText("72", CX, CY, active.css, COL.TEXT, s.speed, "middle");
+        drawPixelText("N", CX, 172, active.gear, COL.ACCENT, s.gear, "top");
+      } else {
+        ctx.fillStyle = COL.DIM;
+        ctx.font = active.rpm;
+        ctx.textAlign = "center"; ctx.textBaseline = "top";
+        ctx.fillText("6500", CX, 44);
+        ctx.fillStyle = COL.TEXT;
+        ctx.font = active.css;
+        ctx.textBaseline = "middle";
+        ctx.fillText("72", CX, CY);
+        ctx.fillStyle = COL.ACCENT;
+        ctx.font = active.gear;
+        ctx.textBaseline = "top";
+        ctx.fillText("N", CX, 172);
+      }
+    }
+
+    function paintOpts() {
+      opts.innerHTML = "";
+      FONTS.forEach((f) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "opt" + (f.id === active.id ? " active" : "");
+        const sampleStyle = f.pixel
+          ? "font:700 12px monospace;image-rendering:pixelated;transform:scale(3);transform-origin:left center;display:inline-block"
+          : `font:${f.css}`;
+        b.innerHTML = `<strong>${f.title}</strong><span>${f.desc}</span><div class="sample"><span style="${sampleStyle}">${f.sample}</span></div>`;
+        b.onclick = () => { active = f; paintOpts(); render(); };
+        opts.appendChild(b);
+      });
+    }
+
+    paintOpts();
+    render();
+  </script>
+</body>
+</html>

@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Enduro — конструктор приборки</title>
+  <style>
+    :root { --bg:#0f1218; --panel:#1a2030; --text:#e8eaef; --muted:#9aa3b5; --accent:#5b8cff; --line:#2e3648; --ok:#7dffa0; --bad:#ff8d8d; }
+    * { box-sizing: border-box; }
+    body { margin:0; font:13px/1.4 system-ui,sans-serif; color:var(--text); background:var(--bg); }
+    .app { display:grid; grid-template-columns: 380px 1fr; min-height:100vh; }
+    @media (max-width: 900px) { .app { grid-template-columns: 1fr; } }
+    .side { background:var(--panel); border-right:1px solid var(--line); padding:16px; overflow:auto; max-height:100vh; }
+    .main { display:grid; place-items:center; padding:24px; gap:16px; }
+    h1 { margin:0 0 4px; font-size:16px; }
+    p { margin:0 0 12px; color:var(--muted); font-size:12px; }
+    label { display:grid; grid-template-columns:1fr auto; align-items:center; gap:4px 8px; margin-bottom:10px; color:var(--muted); font-size:11px; }
+    label > input[type=range],
+    label > input[type=number]:not(.val),
+    label > select { grid-column:1 / -1; width:100%; }
+    input[type=range] { width:100%; }
+    input[type=number], input[type=text], select { width:100%; background:#121722; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 8px; }
+    label > input.val {
+      width:4.8rem; min-width:4.8rem; padding:2px 6px; font-size:12px; line-height:1.2;
+      color:var(--text); text-align:right; font-variant-numeric:tabular-nums;
+    }
+    .chk { display:flex; align-items:center; gap:8px; color:var(--text); margin-bottom:8px; }
+    .bezel { padding:16px; border-radius:50%; background:#07090d; box-shadow:0 0 0 3px #2a2e3a, 0 16px 40px rgba(0,0,0,.5); }
+    canvas { width:360px; height:360px; border-radius:50%; display:block; image-rendering:auto; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; }
+    button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:10px 12px; cursor:pointer; font:inherit; }
+    button.secondary { background:#2a3144; }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    textarea { width:100%; min-height:160px; background:#0b0e14; color:#cde; border:1px solid var(--line); border-radius:8px; padding:10px; font:11px/1.35 ui-monospace,monospace; }
+    .ok { color:var(--ok); font-size:12px; min-height:16px; }
+    .bad { color:var(--bad); }
+    .serial-log { width:100%; min-height:90px; max-height:140px; overflow:auto; background:#0b0e14; border:1px solid var(--line); border-radius:8px; padding:8px; font:11px/1.35 ui-monospace,monospace; color:#9ad; white-space:pre-wrap; }
+    .usb-bar { display:grid; gap:8px; margin-bottom:4px; }
+    .sec { border-top:1px solid var(--line); padding:2px 0 6px; }
+    .sec > summary {
+      list-style:none; cursor:pointer; margin:10px 0 8px;
+      font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em;
+      display:flex; justify-content:space-between; align-items:center; user-select:none;
+    }
+    .sec > summary::-webkit-details-marker { display:none; }
+    .sec > summary::after { content:"▸"; color:var(--muted); font-size:11px; }
+    .sec[open] > summary::after { content:"▾"; }
+    .sec > .hint { margin:0 0 10px; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="side">
+      <h1>Enduro — конструктор приборки</h1>
+      <p>Живой превью на плату по USB (Chrome). «Сохранить на плату» пишет конфиг в EEPROM — переживает перезагрузку.</p>
+
+      <div class="usb-bar">
+        <div class="row">
+          <button type="button" id="btnConnect">Подключить</button>
+          <button type="button" class="secondary" id="btnDisconnect" disabled>Отключить</button>
+          <button type="button" class="secondary" id="btnDemo" disabled>Демо</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button type="button" id="btnSaveBoard" disabled>Сохранить на плату</button>
+          <button type="button" class="secondary" id="btnResetBoard" disabled>Сброс платы</button>
+        </div>
+        <div class="ok" id="serStatus">Не подключено. Нужен http://localhost (не file://).</div>
+      </div>
+
+      <details class="sec" data-sec="usb">
+        <summary>USB — лог</summary>
+        <label class="chk"><input id="livePush" type="checkbox" checked /> Живая отправка на плату</label>
+        <div class="serial-log" id="serLog"></div>
+      </details>
+
+      <div class="row" style="margin:8px 0 4px">
+        <button type="button" class="secondary" id="elemsAllOn">Все элементы вкл</button>
+        <button type="button" class="secondary" id="elemsAllOff">Все элементы выкл</button>
+      </div>
+
+      <details class="sec" data-sec="rpm" open>
+        <summary>Обороты</summary>
+        <label class="chk"><input id="showArc" type="checkbox" checked /> Дуга RPM</label>
+        <label class="chk"><input id="showRpm" type="checkbox" checked /> Цифра RPM</label>
+        <label class="chk"><input id="outerRing" type="checkbox" /> Внешнее кольцо</label>
+        <label class="chk"><input id="ticks" type="checkbox" /> Деления секций</label>
+        <label class="chk"><input id="cutOffEn" type="checkbox" /> Отсечка (shift light)</label>
+        <p class="hint">Дуга RPM, зоны, цифра и превью.</p>
+        <label>Превью <span id="v_prevRpm"></span><input id="prevRpm" type="range" min="0" max="12000" step="50" value="6500" /></label>
+        <label>Макс. <span id="v_rpmMax"></span><input id="rpmMax" type="range" min="6000" max="16000" step="1000" value="12000" /></label>
+        <label>Шаг деления (об/мин) <span id="v_rpmDiv"></span><input id="rpmDiv" type="range" min="250" max="2000" step="250" value="1000" /></label>
+        <p class="hint" id="divHint">Делений: 12</p>
+        <label>Жёлтая зона <span id="v_rpmWarn"></span><input id="rpmWarn" type="range" min="1000" max="15000" step="500" value="5000" /></label>
+        <label>Красная зона <span id="v_rpmRed"></span><input id="rpmRed" type="range" min="1000" max="16000" step="500" value="8000" /></label>
+        <label>Порог отсечки <span id="v_rpmCutOff"></span><input id="rpmCutOff" type="range" min="1000" max="16000" step="100" value="8000" /></label>
+        <label>Мигание мс <span id="v_cutOffMs"></span><input id="cutOffMs" type="range" min="80" max="400" step="10" value="120" /></label>
+        <p class="hint">При ≥ порога дуга мигает белый ↔ красный.</p>
+        <label>Размер цифры <span id="v_szRpm"></span><input id="szRpm" type="range" min="1" max="8" value="2" /></label>
+        <label>Позиция Y <span id="v_rpmY"></span><input id="rpmY" type="range" min="20" max="80" value="42" /></label>
+        <label>Внешний радиус <span id="v_rOut"></span><input id="rOut" type="range" min="80" max="118" value="110" /></label>
+        <label>Толщина дуги <span id="v_thick"></span><input id="thick" type="range" min="4" max="24" value="10" /></label>
+        <label>Зазор ° <span id="v_gap"></span><input id="gap" type="range" min="0" max="10" step="0.5" value="3.5" /></label>
+        <label>Старт ° <span id="v_start"></span><input id="start" type="range" min="0" max="360" step="0.5" value="220" /></label>
+        <label>Дуга ° <span id="v_sweep"></span><input id="sweep" type="range" min="1" max="360" step="0.5" value="260" /></label>
+        <label>Шаг отрисовки ° <span id="v_step"></span><input id="step" type="range" min="0.5" max="4" step="0.5" value="2" /></label>
+      </details>
+
+      <details class="sec" data-sec="speed" open>
+        <summary>Скорость</summary>
+        <label class="chk"><input id="showSpeed" type="checkbox" checked /> Показывать скорость</label>
+        <label>Превью <span id="v_prevSpd"></span><input id="prevSpd" type="range" min="0" max="199" value="72" /></label>
+        <label>Размер цифры <span id="v_szSpeed"></span><input id="szSpeed" type="range" min="1" max="12" value="6" /></label>
+      </details>
+
+      <details class="sec" data-sec="gear" open>
+        <summary>Передача</summary>
+        <label class="chk"><input id="showGear" type="checkbox" checked /> Показывать передачу</label>
+        <label>Превью
+          <select id="prevGear">
+            <option value="-1">ошибка</option>
+            <option value="0" selected>N</option>
+            <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+            <option value="4">4</option><option value="5">5</option><option value="6">6</option>
+          </select>
+        </label>
+        <label>Размер цифры <span id="v_szGear"></span><input id="szGear" type="range" min="1" max="10" value="4" /></label>
+        <label>Позиция Y <span id="v_gearY"></span><input id="gearY" type="range" min="140" max="200" value="168" /></label>
+      </details>
+
+      <details class="sec" data-sec="hb" open>
+        <summary>Дальний</summary>
+        <label class="chk"><input id="showHb" type="checkbox" checked /> Показывать дальний</label>
+        <label class="chk"><input id="prevHb" type="checkbox" /> Превью включён</label>
+        <label>Центр ° <span id="v_hbCenter"></span><input id="hbCenter" type="range" min="-180" max="180" step="0.5" value="-90" /></label>
+        <label>Дуга ° <span id="v_hbSweep"></span><input id="hbSweep" type="range" min="1" max="360" step="0.5" value="40" /></label>
+        <label>Высота (радиус) <span id="v_hbROut"></span><input id="hbROut" type="range" min="40" max="118" value="110" /></label>
+        <label>Толщина <span id="v_hbThick"></span><input id="hbThick" type="range" min="1" max="40" value="7" /></label>
+        <p class="hint">Высота — внешний радиус; дуга остаётся круглой вокруг центра.</p>
+      </details>
+
+      <details class="sec" data-sec="font">
+        <summary>Шрифт (общий)</summary>
+        <p class="hint">Семейство для всех цифр. Размеры — в секциях Обороты / Скорость / Передача.</p>
+        <label>Семейство
+          <select id="fontId">
+            <option value="0" selected>0 Default GFX (no flicker)</option>
+            <option value="1">1 Picopixel</option>
+            <option value="2">2 FreeMonoBold9</option>
+            <option value="3">3 FreeMonoBold12</option>
+            <option value="4">4 FreeSansBold9</option>
+            <option value="5">5 FreeSansBold12</option>
+          </select>
+        </label>
+      </details>
+
+      <details class="sec" data-sec="boot">
+        <summary>Заставка (boot)</summary>
+        <label class="chk"><input id="bootAnim" type="checkbox" checked /> Анимация дуги</label>
+        <label class="chk"><input id="bootShowVer" type="checkbox" checked /> Показывать версию</label>
+        <p class="hint">Дефолты в прошивке. На уже запущенной плате действуют после ребута/прошивки.</p>
+        <label>Размер текста <span id="v_szBoot"></span><input id="szBoot" type="range" min="1" max="8" value="1" /></label>
+        <label>Показ версии мс <span id="v_bootHoldMs"></span><input id="bootHoldMs" type="range" min="0" max="3000" step="50" value="800" /></label>
+        <label>Пауза секции мс <span id="v_bootStepMs"></span><input id="bootStepMs" type="range" min="0" max="80" value="12" /></label>
+      </details>
+
+      <details class="sec" data-sec="profiles">
+        <summary>Профили</summary>
+        <label>Имя
+          <input id="profName" type="text" maxlength="40" placeholder="мой пресет" autocomplete="off" />
+        </label>
+        <label>Сохранённые
+          <select id="profList">
+            <option value="">— нет —</option>
+          </select>
+        </label>
+        <div class="row">
+          <button type="button" id="profSave">Сохранить</button>
+          <button type="button" class="secondary" id="profLoad">Загрузить</button>
+          <button type="button" class="secondary" id="profDel">Удалить</button>
+        </div>
+        <div class="ok" id="profStatus"></div>
+      </details>
+
+      <details class="sec" data-sec="export">
+        <summary>Экспорт дефолтов</summary>
+        <div class="row">
+          <button type="button" id="gen">Сгенерировать</button>
+          <button type="button" class="secondary" id="copy">Копировать</button>
+          <button type="button" class="secondary" id="reset">Сбросить</button>
+        </div>
+        <div class="ok" id="status"></div>
+        <textarea id="out" readonly spellcheck="false"></textarea>
+      </details>
+    </aside>
+    <main class="main">
+      <div class="bezel"><canvas id="screen" width="240" height="240"></canvas></div>
+      <p>Превью 240×240 и живой экран GC9A01 после подключения.</p>
+    </main>
+  </div>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    /** Prefer editable value input; fall back to range/select. */
+    function num(id) {
+      const v = $("v_" + id);
+      if (v) {
+        const n = parseFloat(v.value);
+        return Number.isFinite(n) ? n : 0;
+      }
+      return +$(id).value;
+    }
+    const CX = 120, CY = 120;
+    const SEC_KEY = "enduro-ui-ctor-secs-v2";
+    const PROF_KEY = "enduro-ui-ctor-profiles";
+
+    function rgb565(c) {
+      return `rgb(${Math.round(((c>>11)&31)*255/31)},${Math.round(((c>>5)&63)*255/63)},${Math.round((c&31)*255/31)})`;
+    }
+    const COL = {
+      BG:"#000", RING:rgb565(0x4208), TRACK:rgb565(0x2104), OK:rgb565(0x07e0),
+      WARN:rgb565(0xffe0), ERR:rgb565(0xf800), TEXT:"#fff", DIM:rgb565(0x7bef),
+      ACCENT:rgb565(0x07ff), HB:rgb565(0x5cdf),
+    };
+    const FONT_CSS = {
+      0: { family: "monospace", pixel: true },
+      1: { family: "monospace", pixel: true },
+      2: { family: "Consolas, monospace", pixel: false },
+      3: { family: "Consolas, monospace", pixel: false },
+      4: { family: "Arial, sans-serif", pixel: false },
+      5: { family: "Arial, sans-serif", pixel: false },
+    };
+
+    /* Mirror src/ui_config.cpp kUiDefaults + UI_FONT_ID from ui_config.h */
+    const DEFAULTS = {
+      rpmMax: 12000, rpmWarn: 5000, rpmRed: 8000, rpmDiv: 1000,
+      rOut: 110, thick: 10, gap: 3.5, start: 220, sweep: 260, step: 2,
+      outerRing: false, ticks: false,
+      showArc: true, showRpm: true, showSpeed: true, showGear: true, showHb: true,
+      fontId: 0, szSpeed: 6, szRpm: 2, szGear: 4, szBoot: 2,
+      bootAnim: true, bootShowVer: true, bootHoldMs: 800, bootStepMs: 12,
+      cutOffEn: false, rpmCutOff: 8000, cutOffMs: 120,
+      rpmY: 42, gearY: 168, hbCenter: -90, hbSweep: 40, hbROut: 110, hbThick: 7,
+      prevRpm: 6500, prevSpd: 72, prevGear: 0, prevHb: false,
+    };
+
+    const ELEM_FLAGS = [
+      "showArc", "showRpm", "showSpeed", "showGear", "showHb",
+      "outerRing", "ticks", "bootAnim", "bootShowVer", "cutOffEn",
+    ];
+
+    /* Built-in board presets — seeded once into localStorage (won't overwrite). */
+    const BUILTIN_PROFILES = {
+      "Плата · дефолт": Object.assign({}, DEFAULTS),
+      "Плата · отсечка": Object.assign({}, DEFAULTS, {
+        cutOffEn: true,
+        rpmCutOff: 8000,
+        cutOffMs: 120,
+        ticks: true,
+        prevRpm: 8200,
+        prevSpd: 98,
+        prevGear: 4,
+        prevHb: true,
+      }),
+      "Плата · пустой экран": Object.assign({}, DEFAULTS, {
+        showArc: false, showRpm: false, showSpeed: false, showGear: false, showHb: false,
+        outerRing: false, ticks: false, bootAnim: false, bootShowVer: false, cutOffEn: false,
+      }),
+    };
+
+    const CHK = [
+      "outerRing", "ticks", "showArc", "showRpm", "showSpeed", "showGear", "showHb",
+      "bootAnim", "bootShowVer", "prevHb", "cutOffEn",
+    ];
+    const IDS = Object.keys(DEFAULTS).filter((k) => !CHK.includes(k));
+
+    function persistSections() {
+      const state = {};
+      document.querySelectorAll("details.sec[data-sec]").forEach((el) => {
+        state[el.dataset.sec] = el.open;
+      });
+      sessionStorage.setItem(SEC_KEY, JSON.stringify(state));
+    }
+
+    function restoreSections() {
+      let state = null;
+      try { state = JSON.parse(sessionStorage.getItem(SEC_KEY) || "null"); } catch (_) {}
+      if (!state || typeof state !== "object") return;
+      document.querySelectorAll("details.sec[data-sec]").forEach((el) => {
+        if (Object.prototype.hasOwnProperty.call(state, el.dataset.sec)) {
+          el.open = !!state[el.dataset.sec];
+        }
+      });
+    }
+
+    function setPair(id, value) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return;
+      const v = $("v_" + id);
+      const r = $(id);
+      if (v) v.value = String(n);
+      if (r && r.type === "range") {
+        if (n < +r.min) r.min = String(n);
+        if (n > +r.max) r.max = String(n);
+        r.value = String(n);
+      } else if (r) {
+        r.value = String(n);
+      }
+    }
+
+    function applyCfg(d) {
+      IDS.forEach((k) => { if (d[k] !== undefined) setPair(k, d[k]); });
+      CHK.forEach((k) => {
+        if (!$(k)) return;
+        if (d[k] !== undefined) $(k).checked = !!d[k];
+        else if (["showArc", "showRpm", "showSpeed", "showGear", "showHb"].includes(k)) {
+          $(k).checked = true; /* old profiles → visible by default */
+        }
+      });
+      if (d.fontId !== undefined) $("fontId").value = String(d.fontId);
+      if (d.prevGear !== undefined) $("prevGear").value = String(d.prevGear);
+    }
+
+    /** Turn readout spans into free number inputs (any value). */
+    function upgradeValueSpans() {
+      document.querySelectorAll("label > span[id^='v_']").forEach((span) => {
+        const key = span.id.slice(2);
+        const range = $(key);
+        const inp = document.createElement("input");
+        inp.type = "number";
+        inp.className = "val";
+        inp.id = span.id;
+        inp.step = range && range.step && range.step !== "any" ? range.step : "any";
+        inp.value = range ? range.value : "0";
+        inp.title = "Любое значение";
+        span.replaceWith(inp);
+      });
+    }
+
+    function syncRangeFromVal(id) {
+      const v = $("v_" + id);
+      const r = $(id);
+      if (!v || !r || r.type !== "range") return;
+      const n = parseFloat(v.value);
+      if (!Number.isFinite(n)) return;
+      if (n < +r.min) r.min = String(n);
+      if (n > +r.max) r.max = String(n);
+      r.value = String(n);
+    }
+
+    function syncValFromRange(id) {
+      const v = $("v_" + id);
+      const r = $(id);
+      if (!v || !r) return;
+      if (document.activeElement === v) return;
+      v.value = r.value;
+    }
+
+    function applyDefaults() {
+      applyCfg(DEFAULTS);
+    }
+
+    function readProfiles() {
+      try {
+        const raw = JSON.parse(localStorage.getItem(PROF_KEY) || "{}");
+        return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+      } catch (_) {
+        return {};
+      }
+    }
+
+    function writeProfiles(map) {
+      localStorage.setItem(PROF_KEY, JSON.stringify(map));
+    }
+
+    function seedBuiltinProfiles() {
+      const map = readProfiles();
+      let changed = false;
+      Object.keys(BUILTIN_PROFILES).forEach((name) => {
+        if (!map[name]) {
+          map[name] = Object.assign({}, BUILTIN_PROFILES[name]);
+          changed = true;
+        }
+      });
+      if (changed) writeProfiles(map);
+    }
+
+    function setProfStatus(text, bad) {
+      $("profStatus").textContent = text;
+      $("profStatus").className = bad ? "ok bad" : "ok";
+    }
+
+    function refreshProfList(selectName) {
+      const map = readProfiles();
+      const sel = $("profList");
+      const names = Object.keys(map).sort((a, b) => a.localeCompare(b, "ru"));
+      const keep = selectName !== undefined ? selectName : sel.value;
+      sel.innerHTML = "";
+      const empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = names.length ? "— выбрать —" : "— нет —";
+      sel.appendChild(empty);
+      names.forEach((name) => {
+        const opt = document.createElement("option");
+        opt.value = name;
+        opt.textContent = name;
+        sel.appendChild(opt);
+      });
+      if (keep && map[keep]) sel.value = keep;
+    }
+
+    function resolveProfName() {
+      return ($("profName").value.trim() || $("profList").value.trim());
+    }
+
+    function saveProfile() {
+      const name = resolveProfName();
+      if (!name) {
+        setProfStatus("Укажи имя профиля.", true);
+        return;
+      }
+      const map = readProfiles();
+      map[name] = cfg();
+      writeProfiles(map);
+      $("profName").value = name;
+      refreshProfList(name);
+      setProfStatus("Сохранено: " + name);
+    }
+
+    function loadProfile() {
+      const name = resolveProfName();
+      if (!name) {
+        setProfStatus("Выбери профиль.", true);
+        return;
+      }
+      const map = readProfiles();
+      if (!map[name]) {
+        setProfStatus("Профиль не найден.", true);
+        return;
+      }
+      applyCfg(map[name]);
+      $("profName").value = name;
+      refreshProfList(name);
+      render();
+      setProfStatus("Загружено: " + name);
+    }
+
+    function deleteProfile() {
+      const name = resolveProfName();
+      if (!name) {
+        setProfStatus("Выбери профиль.", true);
+        return;
+      }
+      const map = readProfiles();
+      if (!map[name]) {
+        setProfStatus("Профиль не найден.", true);
+        return;
+      }
+      delete map[name];
+      writeProfiles(map);
+      $("profName").value = "";
+      refreshProfList("");
+      setProfStatus("Удалено: " + name);
+    }
+
+    function cfg() {
+      return {
+        rpmMax: num("rpmMax"), rpmWarn: num("rpmWarn"), rpmRed: num("rpmRed"),
+        rpmDiv: num("rpmDiv"),
+        rOut: num("rOut"), thick: num("thick"), gap: num("gap"),
+        start: num("start"), sweep: num("sweep"), step: num("step"),
+        outerRing: $("outerRing").checked, ticks: $("ticks").checked,
+        showArc: $("showArc").checked, showRpm: $("showRpm").checked,
+        showSpeed: $("showSpeed").checked, showGear: $("showGear").checked,
+        showHb: $("showHb").checked,
+        fontId: num("fontId"),
+        szSpeed: num("szSpeed"), szRpm: num("szRpm"), szGear: num("szGear"), szBoot: num("szBoot"),
+        bootAnim: $("bootAnim").checked, bootShowVer: $("bootShowVer").checked,
+        bootHoldMs: num("bootHoldMs"), bootStepMs: num("bootStepMs"),
+        cutOffEn: $("cutOffEn").checked, rpmCutOff: num("rpmCutOff"), cutOffMs: num("cutOffMs"),
+        rpmY: num("rpmY"), gearY: num("gearY"),
+        hbCenter: num("hbCenter"), hbSweep: num("hbSweep"),
+        hbROut: num("hbROut"), hbThick: num("hbThick"),
+        prevRpm: num("prevRpm"), prevSpd: num("prevSpd"), prevGear: num("prevGear"),
+        prevHb: $("prevHb").checked,
+      };
+    }
+
+    function setAllElems(on) {
+      ELEM_FLAGS.forEach((k) => {
+        const el = $(k);
+        if (!el) return;
+        /* on → stock defaults; off → hide everything without exception */
+        el.checked = on ? !!DEFAULTS[k] : false;
+      });
+      render();
+    }
+
+    function syncLabels() {
+      const c = cfg();
+      const prevRpm = $("prevRpm");
+      if (prevRpm && c.rpmMax > +prevRpm.max) prevRpm.max = String(c.rpmMax);
+      const div = Math.max(1, c.rpmDiv || 1000);
+      const n = Math.max(1, Math.floor(c.rpmMax / div));
+      const hint = $("divHint");
+      if (hint) hint.textContent = "Делений: " + n + " (" + c.rpmMax + " / " + div + ")";
+    }
+
+    const canvas = $("screen");
+    const ctx = canvas.getContext("2d");
+    let cutTimer = 0;
+
+    function drawTextApprox(text, x, y, size, color, fontId, baseline) {
+      const f = FONT_CSS[fontId] || FONT_CSS[0];
+      /* Pixel GFX: CSS was ~1.5× smaller than board (szRpm=2). Use *9 ≈ setTextSize. */
+      const px = f.pixel ? Math.max(8, size * 9) : Math.max(10, size * 9);
+      ctx.fillStyle = color;
+      ctx.font = `700 ${px}px ${f.family}`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = baseline;
+      if (f.pixel) ctx.imageSmoothingEnabled = false;
+      ctx.fillText(text, x, y);
+    }
+
+    function render(opts) {
+      const fromCut = !!(opts && opts.fromCut);
+      const c = cfg();
+      syncLabels();
+      const rIn = c.rOut - c.thick;
+      const divRpm = Math.max(1, c.rpmDiv || 1000);
+      const kCount = Math.max(1, Math.floor(c.rpmMax / divRpm));
+      ctx.fillStyle = COL.BG;
+      ctx.beginPath(); ctx.arc(CX, CY, 120, 0, Math.PI*2); ctx.fill();
+      if (c.outerRing) {
+        ctx.strokeStyle = COL.RING; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(CX,CY,118,0,Math.PI*2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(CX,CY,117,0,Math.PI*2); ctx.stroke();
+      }
+      const gap = Math.max(0, c.gap);
+      const section = Math.max(0.5, (c.sweep - (kCount - 1) * gap) / kCount);
+      const filledK = Math.min(kCount, c.prevRpm / divRpm);
+      const cutOn = c.showArc && c.cutOffEn && c.rpmCutOff > 0 && c.prevRpm >= c.rpmCutOff;
+      const cutBright = cutOn && (Math.floor(Date.now() / Math.max(80, c.cutOffMs || 120)) % 2 === 0);
+      if (c.showArc) {
+        for (let k = 0; k < kCount; k++) {
+          const a0 = (c.start - k * (section + gap)) * Math.PI/180;
+          const a1 = (c.start - k * (section + gap) - section) * Math.PI/180;
+          ctx.beginPath();
+          const steps = Math.max(8, Math.ceil(Math.abs(a0-a1)/(c.step||1)*2));
+          for (let i=0;i<=steps;i++){const t=i/steps,ang=a0+(a1-a0)*t;const x=CX+Math.cos(ang)*c.rOut,y=CY-Math.sin(ang)*c.rOut; i?ctx.lineTo(x,y):ctx.moveTo(x,y);}
+          for (let i=steps;i>=0;i--){const t=i/steps,ang=a0+(a1-a0)*t;ctx.lineTo(CX+Math.cos(ang)*rIn,CY-Math.sin(ang)*rIn);}
+          ctx.closePath();
+          const rpmAt = (k + 0.5) * divRpm;
+          let col = COL.TRACK;
+          if (k < filledK) {
+            if (cutOn) col = cutBright ? COL.TEXT : COL.ERR;
+            else col = rpmAt >= c.rpmRed ? COL.ERR : (rpmAt >= c.rpmWarn ? COL.WARN : COL.OK);
+          }
+          ctx.fillStyle = col; ctx.fill();
+        }
+      }
+      if (c.showRpm) {
+        const rpmShown = Math.floor(c.prevRpm/50)*50;
+        drawTextApprox(String(rpmShown), CX, c.rpmY, c.szRpm, COL.DIM, c.fontId, "top");
+      }
+      if (c.showSpeed) {
+        drawTextApprox(String(c.prevSpd), CX, CY, c.szSpeed, COL.TEXT, c.fontId, "middle");
+      }
+      if (c.showGear) {
+        let g="-", gc=COL.ERR;
+        if (c.prevGear===0){g="N";gc=COL.ACCENT;} else if(c.prevGear>0){g=String(c.prevGear);gc=COL.OK;}
+        drawTextApprox(g, CX, c.gearY, c.szGear, gc, c.fontId, "top");
+      }
+      if (c.showHb) {
+        const hbR = Math.max(c.hbThick + 1, c.hbROut || c.rOut);
+        const hb0 = (c.hbCenter + c.hbSweep/2) * Math.PI/180;
+        const hb1 = (c.hbCenter - c.hbSweep/2) * Math.PI/180;
+        const hbIn = hbR - c.hbThick;
+        ctx.beginPath();
+        const hs = Math.max(6, Math.ceil(c.hbSweep / Math.max(1, c.step)));
+        for (let i=0;i<=hs;i++){const t=i/hs,ang=hb0+(hb1-hb0)*t;const x=CX+Math.cos(ang)*hbR,y=CY-Math.sin(ang)*hbR; i?ctx.lineTo(x,y):ctx.moveTo(x,y);}
+        for (let i=hs;i>=0;i--){const t=i/hs,ang=hb0+(hb1-hb0)*t;ctx.lineTo(CX+Math.cos(ang)*hbIn,CY-Math.sin(ang)*hbIn);}
+        ctx.closePath();
+        ctx.fillStyle = c.prevHb ? COL.HB : COL.TRACK;
+        ctx.fill();
+      }
+      clearTimeout(cutTimer);
+      if (cutOn) {
+        cutTimer = setTimeout(() => render({ fromCut: true }), Math.max(80, c.cutOffMs || 120));
+      }
+      if (!fromCut) schedulePush();
+    }
+
+    function fLit(n) {
+      const s = String(n);
+      return /[eE.]/.test(s) ? s + "f" : s + ".0f";
+    }
+
+    function exportDefaults() {
+      const c = cfg();
+      const now = new Date().toISOString();
+      return `/* Paste into src/ui_config.cpp kUiDefaults — ${now} */
+/* fontId=${c.fontId} is flash-only (UI_FONT_ID in ui_config.h) */
+static const UiCfg kUiDefaults = {
+    ${c.rpmMax}, ${c.rpmWarn}, ${c.rpmRed}, ${c.rpmDiv}, ${c.rOut}, ${c.thick},
+    ${fLit(c.start)}, ${fLit(c.sweep)}, ${fLit(c.gap)}, ${fLit(c.step)},
+    ${c.outerRing ? "true" : "false"}, ${c.ticks ? "true" : "false"},
+    ${c.showArc ? "true" : "false"}, ${c.showRpm ? "true" : "false"},
+    ${c.showSpeed ? "true" : "false"}, ${c.showGear ? "true" : "false"},
+    ${c.showHb ? "true" : "false"},
+    ${c.szSpeed}, ${c.szRpm}, ${c.szGear}, ${c.szBoot},
+    ${c.rpmY}, ${c.gearY}, ${fLit(c.hbCenter)}, ${fLit(c.hbSweep)}, ${c.hbROut}, ${c.hbThick},
+    ${c.bootAnim ? "true" : "false"}, ${c.bootShowVer ? "true" : "false"},
+    ${c.bootHoldMs}, ${c.bootStepMs},
+    ${c.cutOffEn ? "true" : "false"}, ${c.rpmCutOff}, ${c.cutOffMs},
+};
+`;
+    }
+
+    /* ---- Web Serial ---- */
+    let port = null;
+    let reader = null;
+    let writer = null;
+    let demoOn = false;
+    let pushTimer = 0;
+    let readAbort = null;
+    const enc = new TextEncoder();
+    const dec = new TextDecoder();
+
+    function logLine(s) {
+      const el = $("serLog");
+      el.textContent = (el.textContent + s).slice(-2500);
+      el.scrollTop = el.scrollHeight;
+    }
+
+    function setSerStatus(text, bad) {
+      $("serStatus").textContent = text;
+      $("serStatus").className = bad ? "ok bad" : "ok";
+    }
+
+    function uiLines(c) {
+      return [
+        `UI rpmMax=${c.rpmMax} rpmWarn=${c.rpmWarn} rpmRed=${c.rpmRed} rpmDiv=${c.rpmDiv} rOut=${c.rOut} thick=${c.thick}`,
+        `UI gap=${c.gap} start=${c.start} sweep=${c.sweep} step=${c.step}`,
+        `UI outerRing=${c.outerRing?1:0} ticks=${c.ticks?1:0} showArc=${c.showArc?1:0} showRpm=${c.showRpm?1:0} showSpeed=${c.showSpeed?1:0} showGear=${c.showGear?1:0} showHb=${c.showHb?1:0}`,
+        `UI szSpeed=${c.szSpeed} szRpm=${c.szRpm} szGear=${c.szGear} szBoot=${c.szBoot}`,
+        `UI rpmY=${c.rpmY} gearY=${c.gearY} hbCenter=${c.hbCenter} hbSweep=${c.hbSweep} hbROut=${c.hbROut} hbThick=${c.hbThick}`,
+        `UI bootAnim=${c.bootAnim?1:0} bootShowVer=${c.bootShowVer?1:0} bootHoldMs=${c.bootHoldMs} bootStepMs=${c.bootStepMs}`,
+        `UI cutOffEn=${c.cutOffEn?1:0} rpmCutOff=${c.rpmCutOff} cutOffMs=${c.cutOffMs}`,
+      ];
+    }
+
+    function setLine(c) {
+      return `SET S=${c.prevSpd} R=${c.prevRpm} G=${c.prevGear} HB=${c.prevHb ? 1 : 0}`;
+    }
+
+    async function send(text) {
+      if (!writer) return;
+      await writer.write(enc.encode(text.endsWith("\n") ? text : text + "\n"));
+      logLine("> " + text.trim() + "\n");
+    }
+
+    async function pushAll(c) {
+      for (const line of uiLines(c)) {
+        await send(line);
+      }
+      /* SET останавливает DEMO-петлю — шлём только в ручном LIVE. */
+      if (!demoOn) {
+        await send(setLine(c));
+      }
+    }
+
+    function schedulePush() {
+      if (!$("livePush").checked || !writer) return;
+      clearTimeout(pushTimer);
+      pushTimer = setTimeout(async () => {
+        try {
+          await pushAll(cfg());
+        } catch (e) {
+          setSerStatus("Ошибка записи: " + e.message, true);
+        }
+      }, 220);
+    }
+
+    async function readLoop() {
+      readAbort = new AbortController();
+      try {
+        while (port && reader) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value) logLine(dec.decode(value));
+        }
+      } catch (e) {
+        if (e.name !== "AbortError") {
+          setSerStatus("Ошибка чтения: " + e.message, true);
+        }
+      }
+    }
+
+    async function connect() {
+      if (!("serial" in navigator)) {
+        setSerStatus("Нужен Chrome или Edge с Web Serial.", true);
+        return;
+      }
+      try {
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 115200 });
+        writer = port.writable.getWriter();
+        reader = port.readable.getReader();
+        $("btnConnect").disabled = true;
+        $("btnDisconnect").disabled = false;
+        $("btnDemo").disabled = false;
+        $("btnSaveBoard").disabled = false;
+        $("btnResetBoard").disabled = false;
+        setSerStatus("Подключено — живая отправка активна.");
+        await send("LIVE 1");
+        await pushAll(cfg());
+        readLoop();
+      } catch (e) {
+        setSerStatus("Не удалось подключить: " + e.message, true);
+      }
+    }
+
+    async function disconnect() {
+      clearTimeout(pushTimer);
+      try { if (reader) { await reader.cancel(); reader.releaseLock(); } } catch (_) {}
+      try { if (writer) { writer.releaseLock(); } } catch (_) {}
+      try { if (port) await port.close(); } catch (_) {}
+      reader = null; writer = null; port = null; demoOn = false;
+      $("btnConnect").disabled = false;
+      $("btnDisconnect").disabled = true;
+      $("btnDemo").disabled = true;
+      $("btnSaveBoard").disabled = true;
+      $("btnResetBoard").disabled = true;
+      $("btnDemo").textContent = "Демо";
+      setSerStatus("Отключено.");
+    }
+
+    async function saveToBoard() {
+      if (!writer) return;
+      try {
+        await pushAll(cfg());
+        await send("UI SAVE");
+        setSerStatus("Конфиг сохранён в EEPROM — останется после перезагрузки.");
+      } catch (e) {
+        setSerStatus("Ошибка сохранения: " + e.message, true);
+      }
+    }
+
+    async function resetBoard() {
+      if (!writer) return;
+      if (!confirm("Сбросить конфиг на плате к стоку и очистить EEPROM?")) return;
+      try {
+        await send("UI RESET");
+        applyDefaults();
+        render();
+        setSerStatus("Плата сброшена к стоку (EEPROM очищен).");
+      } catch (e) {
+        setSerStatus("Ошибка сброса: " + e.message, true);
+      }
+    }
+
+    async function toggleDemo() {
+      demoOn = !demoOn;
+      await send(demoOn ? "DEMO 1" : "DEMO 0");
+      $("btnDemo").textContent = demoOn ? "Демо вкл" : "Демо";
+      if (!demoOn) {
+        await send("LIVE 1");
+        await send(setLine(cfg()));
+      }
+    }
+
+    function bind() {
+      document.querySelectorAll("input[type=range]").forEach((el) => {
+        el.addEventListener("input", () => {
+          syncValFromRange(el.id);
+          render();
+        });
+        el.addEventListener("change", () => {
+          syncValFromRange(el.id);
+          render();
+        });
+      });
+      document.querySelectorAll("input.val").forEach((el) => {
+        const key = el.id.slice(2);
+        el.addEventListener("input", () => {
+          syncRangeFromVal(key);
+          render();
+        });
+        el.addEventListener("change", () => {
+          syncRangeFromVal(key);
+          render();
+        });
+      });
+      document.querySelectorAll("input:not([type=range]):not(.val), select").forEach((el) => {
+        el.addEventListener("input", render);
+        el.addEventListener("change", render);
+      });
+      document.querySelectorAll("details.sec").forEach((el) => {
+        el.addEventListener("toggle", persistSections);
+      });
+      $("gen").onclick = () => {
+        $("out").value = exportDefaults();
+        $("status").textContent = "Вставь в src/ui_config.cpp (kUiDefaults).";
+      };
+      $("copy").onclick = async () => {
+        if (!$("out").value) $("out").value = exportDefaults();
+        await navigator.clipboard.writeText($("out").value);
+        $("status").textContent = "Скопировано.";
+      };
+      $("reset").onclick = () => {
+        applyDefaults();
+        render();
+        $("out").value = exportDefaults();
+        $("status").textContent = "Сброшено к исходным значениям.";
+      };
+      $("btnConnect").onclick = connect;
+      $("btnDisconnect").onclick = disconnect;
+      $("btnDemo").onclick = toggleDemo;
+      $("btnSaveBoard").onclick = saveToBoard;
+      $("btnResetBoard").onclick = resetBoard;
+      $("elemsAllOn").onclick = () => setAllElems(true);
+      $("elemsAllOff").onclick = () => setAllElems(false);
+      $("profSave").onclick = saveProfile;
+      $("profLoad").onclick = loadProfile;
+      $("profDel").onclick = deleteProfile;
+      $("profList").onchange = () => {
+        if ($("profList").value) $("profName").value = $("profList").value;
+      };
+    }
+
+    upgradeValueSpans();
+    restoreSections();
+    bind();
+    seedBuiltinProfiles();
+    refreshProfList("");
+    applyDefaults();
+    render();
+    $("out").value = exportDefaults();
+    if (!window.isSecureContext || location.protocol === "file:") {
+      setSerStatus("Открой через localhost: npx --yes serve tools -p 5173", true);
+    }
+  </script>
+</body>
+</html>
