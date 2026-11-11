@@ -1,76 +1,152 @@
 # Enduro-v2
 
-Кастомная приборка мотоцикла: **Arduino Pro Micro 5V/16 MHz** + **GC9A01** + **CHMCU-2317 (MCP23017)** + сигналы штатной панели **Janxin M178A-005-1P**.
+Кастомная **цифровая приборка** для эндуро-мотоцикла: вместо (или рядом со) штатной панелью **Janxin M178A-005-1P** показывает обороты, скорость, передачу и дальний свет на круглом дисплее.
 
-Подробная распиновка: **[docs/HARDWARE.md](docs/HARDWARE.md)**.  
-Схемы (draw.io):  
-- блоки со стрелками (тёмная): **[docs/wiring-blocks-dark.drawio](docs/wiring-blocks-dark.drawio)**  
-- подробная: **[docs/wiring-enduro-v3.drawio](docs/wiring-enduro-v3.drawio)**  
-Открыть в [app.diagrams.net](https://app.diagrams.net) → File → Open from → Device.  
-Фото разъёма M178: **[docs/M178-CONNECTOR.md](docs/M178-CONNECTOR.md)**.
+```text
+  датчики байка (жгут M178)
+           │
+     PC817 (оптроны) + GPIO
+           │
+    Arduino Pro Micro
+           │
+      GC9A01 240×240
+     (дуга RPM, км/ч, N/1–6, HB)
+```
 
-## Текущий статус прошивки
+## Зачем этот проект
 
-Rider UI **2.2.0**: дуга RPM + скорость + передача + HB.
+Штатная приборка M178 отдаёт сигналы передач, тахометра, дальнего и т.п. по разъёму. Enduro-v2 читает эти сигналы и рисует свой **rider UI** на круглом TFT — с демо-режимом за столом и live-настройкой экрана с ПК.
 
-**Автовыбор источника (без спец-флага):**
-- USB, жгут передач не виден → **DEMO**
-- На байке (любая линия N/1…6 = LOW) → **прод**, значения с датчиков
-- Serial `LIVE`/`SET` — ручной override; `AUTO` — снова авто
+**Сейчас умеет (прошивка 2.3.0):**
 
-## Build & upload
+- дуга оборотов (RPM) с зонами warn/red;
+- скорость;
+- передача **N / 1…6**;
+- индикатор дальнего света (HB);
+- авторежим: без жгута → DEMO, на байке → сигналы с датчиков;
+- управление и тюнинг UI по USB Serial / Web Serial.
+
+## Из чего состоит
+
+| Часть | Роль |
+|-------|------|
+| **Arduino Pro Micro** 5V / 16 MHz (ATmega32U4) | мозг |
+| **GC9A01** 240×240 круглый TFT | экран |
+| **PC817** (модуль оптронов) | развязка RPM / SPEED / HB от борта 12 V |
+| **Жгут M178** | передачи N/1–6 напрямую на GPIO (D2…D8) |
+| **`tools/ui-constructor.html`** | конструктор экрана в браузере (Chrome + Web Serial) |
+
+Питание платы пока от **USB**. Питание от борта (+12 V → 5 V) ещё не разведено.
+
+Подробная распиновка, оптроны, калибровка RPM: **[docs/HARDWARE.md](docs/HARDWARE.md)**.  
+Фото разъёма M178: **[docs/M178-CONNECTOR.md](docs/M178-CONNECTOR.md)**.  
+Схемы (draw.io → [app.diagrams.net](https://app.diagrams.net)):
+
+- [docs/wiring-blocks-dark.drawio](docs/wiring-blocks-dark.drawio) — блоки со стрелками;
+- [docs/wiring-enduro-v3.drawio](docs/wiring-enduro-v3.drawio) — подробная схема.
+
+## Как это работает
+
+1. **Передачи** — линии жгута замыкаются на массу байка; Pro Micro читает их как `INPUT_PULLUP` (активный LOW).
+2. **RPM / SPEED / HB** — через оптрон PC817 (бортовые уровни на Arduino напрямую не пускаем).
+3. **Источник данных** выбирается сам:
+   - USB, жгут передач не виден → **DEMO** (анимация для отладки UI);
+   - на байке (любая линия N/1…6 = LOW) → **прод**, значения с датчиков;
+   - Serial `LIVE` / `SET` — ручной override; `AUTO` — снова авто.
+
+Код: `src/main.cpp` (цикл), `src/remote.*` (источник), `src/ui*.*` (отрисовка), `src/rpm.*` / `src/speed.*` / `src/gear_inputs.*`.
+
+## Быстрый старт
+
+Нужны [PlatformIO](https://platformio.org/) и Pro Micro 5V/16 MHz.
 
 ```bash
 pio run -e promicro -t upload
 pio device monitor -b 115200
 ```
 
-Если плата 3.3V / 8 MHz:
+Плата 3.3 V / 8 MHz:
 
 ```bash
 pio run -e promicro8 -t upload
 ```
 
-## USB Serial — управление с ПК
-
-В мониторе (115200) или из `tools/ui-constructor.html` (Chrome + Web Serial):
-
-| Команда | Действие |
-|---------|----------|
-| `HELP` | список команд |
-| `AUTO` | авто: USB→DEMO / байк→сигналы |
-| `DEMO 1` / `DEMO 0` | принудительное демо / вернуться в AUTO |
-| `LIVE 1` / `LIVE 0` | ручные значения вместо датчиков |
-| `SPEED 80` `RPM 6500` `GEAR N` `HB 1` | удержание значений |
-| `SET S=72 R=6500 G=0 HB=0` | пакет значений |
-| `UI rpmMax=12000 rOut=110 ...` | live UI-конфиг → мгновенно на экран |
-| `UI GET` / `UI RESET` | прочитать / сбросить конфиг |
-
-Live UI из браузера:
-
-```bash
-npx --yes serve D:/Project/Main/enduro-v2/tools -p 5173
-```
-
-Открыть http://localhost:5173/ui-constructor.html → **Connect** → крутить слайдеры.  
-`fontId` меняется только перепрошивкой (`UI_FONT_ID` в `src/ui_config.h`).
+После прошивки в мониторе увидите версию (`2.3.0`) и поток `speed rpm gear hb bike usb`.
 
 ## Краткая распиновка Pro Micro
 
 | Устройство | Сигнал | Pin |
 |------------|--------|-----|
-| PC817 OUT1 | RPM (interrupt) | **D0** |
-| PC817 OUT2 | SPEED (interrupt) | **D1** |
-| GC9A01 | DC / RES / BLK / CS | **A0 / A1 / A2** / D10 |
-| GC9A01 | SCK / MOSI | D15 / D16 |
-| **D2..D7** | Gear 1..6 | switch → GND |
-| **D8** | Neutral | switch → GND |
-| PC817 → **D9** | High Beam (12 V) | через оптрон |
+| PC817 | RPM | **D0** |
+| PC817 | SPEED | **D1** |
+| Gear 1…6 | switch → GND | **D2…D7** |
+| Neutral | switch → GND | **D8** |
+| PC817 | High Beam | **D9** |
+| GC9A01 | DC / RES / BLK / CS | **A0 / A1 / A2** / **D10** |
+| GC9A01 | SCK / MOSI | **D15 / D16** |
 
-**RPM только на D0** — D2 занят SDA.
+**Важно:** +12 V с байка на Arduino не подавать. RPM/SPEED/HB — только через PC817. Для прямого чтения передач нужна **общая GND** борт ↔ Arduino.
+
+Полная карта пинов и жгутов — в [docs/HARDWARE.md](docs/HARDWARE.md).
+
+## USB Serial — команды
+
+Монитор **115200** или браузерный конструктор (Chrome + Web Serial).
+
+| Команда | Действие |
+|---------|----------|
+| `HELP` | список команд |
+| `AUTO` | авто: USB→DEMO / байк→сигналы |
+| `DEMO 1` / `DEMO 0` | принудительное демо / назад в AUTO |
+| `LIVE 1` / `LIVE 0` | ручные значения вместо датчиков |
+| `SPEED 80` `RPM 6500` `GEAR N` `HB 1` | удержание значений |
+| `SET S=72 R=6500 G=0 HB=0` | пакет значений |
+| `UI rpmMax=12000 rOut=110 ...` | live UI-конфиг → сразу на экран |
+| `UI GET` / `UI RESET` | прочитать / сбросить конфиг |
+
+### Конструктор UI в браузере
+
+```bash
+npx --yes serve ./tools -p 5173
+```
+
+Открыть http://localhost:5173/ui-constructor.html → **Connect** → крутить слайдеры.  
+`fontId` меняется только перепрошивкой (`UI_FONT_ID` в `src/ui_config.h`).
 
 ## Калибровка RPM
 
-1. Завести двигатель, смотреть штатный тахо M178 и Serial/экран (Hz + RPM).
+Константа `RPM_PULSES_PER_REV` в `src/rpm.h` (сейчас заглушка `1.0` — нужно откалибровать на своём двигателе).
+
+1. Завести мотор, сравнить штатный тахо M178 и Hz/RPM в Serial или на экране.
 2. Точки: ~2000, 3000, 4000, 5000 RPM.
 3. `RPM_PULSES_PER_REV ≈ (Hz × 60) / RPM_штатный` → прописать в `src/rpm.h`.
+
+## Структура репозитория
+
+```text
+enduro-v2/
+├── platformio.ini      # сборка PlatformIO
+├── src/                # прошивка
+│   ├── main.cpp
+│   ├── remote.*        # DEMO / LIVE / bike
+│   ├── ui*.*           # экран
+│   ├── rpm.* speed.*   # импульсы с оптронов
+│   └── gear_inputs.*   # N/1…6
+├── tools/              # UI-конструктор, превью, генераторы схем
+└── docs/               # железо, фото разъёма, draw.io / SVG
+```
+
+## Статус и ограничения
+
+| Тема | Состояние |
+|------|-----------|
+| Rider UI (дуга + скорость + передача + HB) | работает |
+| Авто DEMO / прод | работает |
+| Live UI по Serial | работает |
+| Калибровка RPM | нужна на байке (`rpm.h`) |
+| Питание от борта | ещё нет (USB) |
+| Неизвестные пины M178 (8, 9, 17) | не трогать до идентификации |
+
+## Лицензия
+
+Пока без явной лицензии — репозиторий публичный для просмотра и форка; перед коммерческим использованием уточните у автора.
